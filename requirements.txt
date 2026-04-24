@@ -1,0 +1,7 @@
+akshare
+yfinance
+fredapi
+feedparser
+pyyaml
+pandas
+requests
