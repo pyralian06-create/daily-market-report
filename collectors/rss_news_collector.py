@@ -32,14 +32,6 @@ class MarketNewsCollector:
         """抓取并解析单个 RSS 源"""
         print(f"正在拉取: {source_name} ...")
         parsed_feed = feedparser.parse(url)
-
-        # 将原始结果写入 tests/ 目录，文件名取 source_name 中的中文/英文部分
-        safe_name = re.sub(r"[^\w一-鿿]+", "_", source_name).strip("_")
-        TESTS_DIR.mkdir(exist_ok=True)
-        debug_path = TESTS_DIR / f"rss_{safe_name}.json"
-        with open(debug_path, "w", encoding="utf-8") as f:
-            json.dump(dict(parsed_feed), f, ensure_ascii=False, indent=2, default=str)
-        print(f"拉取: {source_name} -> {debug_path}")
         
         # 异常处理：RSSHub 有时会返回状态码错误
         if parsed_feed.bozo and hasattr(parsed_feed.bozo_exception, 'getcode'):
@@ -73,7 +65,17 @@ class MarketNewsCollector:
             
         return entries_data
 
-    def generate_report(self, top_n=5):
+    def collect_all(self, top_n: int = 10) -> dict:
+        """返回各 RSS 源的原始条目，key 为源名称，value 为条目列表"""
+        result = {}
+        for source_name, url in self.feeds.items():
+            try:
+                result[source_name] = self.fetch_feed(source_name, url, top_n=top_n)
+            except Exception as e:
+                result[source_name] = {"error": f"采集失败: {e}"}
+        return result
+
+    def generate_report(self, top_n=10):
         """生成 Markdown 格式的资讯聚合报告"""
         report_date = datetime.now().strftime("%Y-%m-%d %H:%M")
         

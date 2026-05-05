@@ -18,6 +18,7 @@ build/
 # Logs
 logs/
 *.log
+reports/
 
 # Test data snapshots
 tests/*.csv
@@ -46,3 +47,6 @@ htmlcov/
 # Distribution
 *.whl
 *.tar.gz
+
+# cache
+cache/

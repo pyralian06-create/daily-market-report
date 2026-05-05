@@ -1,7 +1,9 @@
-akshare
 yfinance
-fredapi
 feedparser
 pyyaml
+python-dotenv
 pandas
 requests
+beautifulsoup4
+schedule
+langchain-google-genai

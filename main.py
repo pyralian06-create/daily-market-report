@@ -1,21 +1,28 @@
-"""日报主程序
+"""日报主程序入口
 
 用法：
-  python main.py --dry-run    # 采集并打印到终端，不发送
-  python main.py --send       # 采集并发送（WeCom，阶段二实现）
+  python main.py --morning          # 采集晨报数据并打印
+  python main.py --evening          # 采集晚报数据并打印
+  python main.py --morning --send   # 采集晨报并发送 Telegram
+  python main.py --evening --send   # 采集晚报并发送 Telegram
 """
 
 import argparse
-import json
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
-import yaml
-
-from collectors import a_share, us_stock, macro, news
-
-CONFIG_PATH = Path(__file__).parent / "config" / "config.yaml"
+import settings
+from senders.telegram_sender import send_report
+from collectors.a_stock_overview import DailyMarketCollector
+from collectors.chinese_marco_data import ChinaMacroCollector
+from collectors.global_marco_data import GlobalMacroCollector
+from collectors.global_economy_data import GlobalEconomyCollector, IntlMacroCollector
+from collectors.rss_news_collector import MarketNewsCollector
+from reporters.morning_formatter import format_morning_report
+from reporters.evening_formatter import format_evening_report
+from reporters.ai_summarizer import generate_morning_summary, generate_evening_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,102 +31,151 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        logger.warning("config.yaml 不存在，使用空配置")
-        return {}
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+REPORTS_DIR = Path(__file__).parent / "reports"
 
 
-def collect_all(config: dict) -> dict:
-    logger.info("=== 开始采集 ===")
-    return {
-        "a_share": a_share.collect(),
-        "us_stock": us_stock.collect(config),
-        "macro":    macro.collect(config),
-        "news":     news.collect(config),
-    }
+def save_report(report: str, label: str, date_str: str) -> None:
+    REPORTS_DIR.mkdir(exist_ok=True)
+    slug = "morning" if "晨" in label else "evening"
+    path = REPORTS_DIR / f"{date_str}_{slug}.txt"
+    path.write_text(report, encoding="utf-8")
+    logger.info("报告已保存: %s", path)
 
 
-def print_report(data: dict) -> None:
-    print("\n" + "=" * 60)
-    print("【市场日报】干运行预览")
-    print("=" * 60)
+def collect_morning() -> dict:
+    """晨报（9:00）：全球经济指标 + 全球指数行情 + 财经资讯"""
+    logger.info("=== 开始采集晨报数据 ===")
+    data = {"report_date": datetime.now().strftime("%Y-%m-%d")}
 
-    # A股
-    print("\n【A股行情】")
-    for idx in data["a_share"].get("indices", []):
-        sign = "+" if idx["change_pct"] >= 0 else ""
-        print(f"  {idx['name']}: {idx['price']} ({sign}{idx['change_pct']:.2f}%)")
-    stats = data["a_share"].get("limit_stats", {})
-    print(f"  涨停: {stats.get('limit_up', 0)} 家  跌停: {stats.get('limit_down', 0)} 家")
+    logger.info("[1/3] 采集全球经济指标（国债/利率）...")
+    try:
+        eco = GlobalEconomyCollector().collect_all()
+        intl = IntlMacroCollector().collect_all()
+        data["global_economy"] = {**eco, **intl}
+        logger.info("  全球经济指标采集完成")
+    except Exception as e:
+        logger.error("  全球经济指标采集失败: %s", e)
+        data["global_economy"] = {"error": str(e)}
 
-    # 热门板块
-    sectors = data["a_share"].get("hot_sectors", [])
-    if sectors:
-        print("\n  板块热点 Top5:")
-        for s in sectors[:5]:
-            print(f"    {s['name']}: +{s['change_pct']:.2f}%")
+    logger.info("[2/3] 采集全球指数行情（A股/美股/港股/大宗商品）...")
+    try:
+        data["global_macro"] = GlobalMacroCollector().collect_all()
+        logger.info("  全球指数采集完成")
+    except Exception as e:
+        logger.error("  全球指数采集失败: %s", e)
+        data["global_macro"] = {"error": str(e)}
 
-    # 美股
-    print("\n【美股行情】")
-    for idx in data["us_stock"].get("indices", []):
-        sign = "+" if idx["change_pct"] >= 0 else ""
-        print(f"  {idx['name']}: {idx['price']} ({sign}{idx['change_pct']:.2f}%)")
-    wl = data["us_stock"].get("watchlist", [])
-    if wl:
-        print("  自选股:")
-        for s in wl:
-            sign = "+" if s["change_pct"] >= 0 else ""
-            print(f"    {s['symbol']}: {s['price']} ({sign}{s['change_pct']:.2f}%)")
+    logger.info("[3/3] 采集财经资讯（RSS）...")
+    try:
+        data["news"] = MarketNewsCollector().collect_all(top_n=5)
+        logger.info("  财经资讯采集完成")
+    except Exception as e:
+        logger.error("  财经资讯采集失败: %s", e)
+        data["news"] = {"error": str(e)}
 
-    # 宏观
-    print("\n【宏观数据】")
-    china = data["macro"].get("china", {})
-    if "usd_cny" in china:
-        print(f"  美元/人民币: {china['usd_cny']['rate']}")
-    if "pmi" in china:
-        print(f"  中国PMI: {china['pmi']['value']} ({china['pmi']['date']})")
-    if "cpi" in china:
-        print(f"  中国CPI: {china['cpi']['value']}% ({china['cpi']['date']})")
-    us = data["macro"].get("us", {})
-    if "fed_funds_rate" in us:
-        print(f"  美联储利率: {us['fed_funds_rate']['value']}%")
-    if "us_10y_yield" in us:
-        print(f"  美国10年期国债: {us['us_10y_yield']['value']}%")
-    for c in data["macro"].get("commodities", []):
-        sign = "+" if c["change_pct"] >= 0 else ""
-        print(f"  {c['name']}: {c['price']} ({sign}{c['change_pct']:.2f}%)")
+    logger.info("=== 晨报采集完成 ===")
+    return data
 
-    # 新闻
-    print("\n【财经新闻】")
-    articles = data["news"].get("articles", [])
-    for i, a in enumerate(articles[:10], 1):
-        print(f"  {i}. [{a['source']}] {a['title']}")
-    stats = data["news"].get("source_stats", {})
-    print(f"\n  来源统计: {stats}")
 
-    print("\n" + "=" * 60)
+def collect_evening() -> dict:
+    """晚报（18:00）：A股行情 + 中国宏观 + 财经资讯"""
+    logger.info("=== 开始采集晚报数据 ===")
+    data = {"report_date": datetime.now().strftime("%Y-%m-%d")}
+
+    logger.info("[1/3] 采集 A 股行情...")
+    try:
+        data["a_stock"] = DailyMarketCollector().collect_all()
+        logger.info("  A 股采集完成")
+    except Exception as e:
+        logger.error("  A 股采集失败: %s", e)
+        data["a_stock"] = {"error": str(e)}
+
+    logger.info("[2/3] 采集中国宏观数据...")
+    try:
+        data["china_macro"] = ChinaMacroCollector().collect_all()
+        logger.info("  中国宏观采集完成")
+    except Exception as e:
+        logger.error("  中国宏观采集失败: %s", e)
+        data["china_macro"] = {"error": str(e)}
+
+    logger.info("[3/3] 采集财经资讯（RSS）...")
+    try:
+        data["news"] = MarketNewsCollector().collect_all(top_n=5)
+        logger.info("  财经资讯采集完成")
+    except Exception as e:
+        logger.error("  财经资讯采集失败: %s", e)
+        data["news"] = {"error": str(e)}
+
+    logger.info("=== 晚报采集完成 ===")
+    return data
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="金融日报生成器")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--dry-run", action="store_true", help="采集并打印，不发送")
-    group.add_argument("--send",    action="store_true", help="采集并发送到企业微信")
+    parser.add_argument("--morning", action="store_true", help="生成晨报（09:00）")
+    parser.add_argument("--evening", action="store_true", help="生成晚报（18:00）")
+    parser.add_argument("--send", action="store_true", help="采集后发送到 Telegram")
     args = parser.parse_args()
 
-    config = load_config()
-    data = collect_all(config)
+    if not args.morning and not args.evening:
+        parser.print_help()
+        sys.exit(0)
 
-    if args.dry_run:
-        print_report(data)
-        print("\n[dry-run] 原始数据已输出。如需查看完整 JSON，重定向到文件：")
-        print("  python main.py --dry-run > output.json")
-    else:
-        logger.warning("--send 功能在阶段二实现（WeCom机器人接入后启用）")
+    reports: list[tuple[str, str]] = []
+
+    if args.morning:
+        data = collect_morning()
+        logger.info("正在生成晨报 AI 摘要...")
+        ai_summary = generate_morning_summary(
+            data.get("global_macro", {}),
+            data.get("global_economy", {}),
+            data.get("news", {}),
+        )
+        report = format_morning_report(
+            data.get("global_macro", {}),
+            data.get("global_economy", {}),
+            data.get("news", {}),
+            data.get("report_date"),
+            ai_summary=ai_summary,
+        )
+        save_report(report, "晨报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
+        reports.append(("晨报", report))
+        if not args.send:
+            print(report)
+
+    if args.evening:
+        data = collect_evening()
+        logger.info("正在生成晚报 AI 摘要...")
+        ai_summary = generate_evening_summary(
+            data.get("a_stock", {}),
+            data.get("china_macro", {}),
+            data.get("news", {}),
+        )
+        report = format_evening_report(
+            data.get("a_stock", {}),
+            data.get("china_macro", {}),
+            data.get("news", {}),
+            data.get("report_date"),
+            ai_summary=ai_summary,
+        )
+        save_report(report, "晚报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
+        reports.append(("晚报", report))
+        if not args.send:
+            print(report)
+
+    if args.send:
+        bot_token = settings.TELEGRAM_BOT_TOKEN
+        chat_id = settings.TELEGRAM_CHAT_ID
+        if not bot_token or not chat_id:
+            logger.error("请先在 .env 中配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID")
+            sys.exit(1)
+        for label, report in reports:
+            logger.info("正在发送 %s 到 Telegram...", label)
+            ok = send_report(report, bot_token=bot_token, chat_id=chat_id)
+            if ok:
+                logger.info("%s 发送成功", label)
+            else:
+                logger.error("%s 发送失败", label)
 
 
 if __name__ == "__main__":
