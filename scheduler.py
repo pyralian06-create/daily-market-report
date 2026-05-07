@@ -1,7 +1,7 @@
 """定时调度守护进程
 
 09:00 Asia/Shanghai → 晨报（全球宏观 + 利率 + 资讯）
-17:00 Asia/Shanghai → 晚报（A 股行情 + 中国宏观 + 资讯）
+18:00 Asia/Shanghai → 晚报（A 股行情 + 中国宏观 + 资讯）
 
 启动方式：
   python scheduler.py
@@ -113,7 +113,7 @@ def run_evening() -> None:
 def reschedule_daily() -> None:
     schedule.clear()
     morning_local = shanghai_to_local(9, 0)
-    evening_local = shanghai_to_local(17, 0)
+    evening_local = shanghai_to_local(18, 0)
     schedule.every().day.at(morning_local).do(run_morning)
     schedule.every().day.at(evening_local).do(run_evening)
     # 每天 00:01 重新计算，应对夏令时或时区变更

@@ -4,6 +4,19 @@ from datetime import datetime
 from typing import Optional
 
 
+def _fmt_pct(v) -> str:
+    if v is None:
+        return ""
+    return f" ▲+{v:.2f}%" if v >= 0 else f" ▼{v:.2f}%"
+
+
+def _fmt_delta(v) -> str:
+    if v is None:
+        return ""
+    sign = "+" if v >= 0 else ""
+    return f" ∆{sign}{v:.2f}亿"
+
+
 def format_evening_report(
     a_stock: dict,
     china_macro: dict,
@@ -40,7 +53,7 @@ def _format_a_stock_section(a_stock: dict) -> str:
         lines.append(f"  市场行情: [失败] {breadth['error']}")
     elif isinstance(breadth, dict) and breadth:
         lines.append(f"  交易日期   : {breadth.get('交易日期', 'N/A')}")
-        lines.append(f"  两市成交额 : {breadth.get('总成交额(亿元)', 'N/A')} 亿元")
+        lines.append(f"  两市成交额 : {breadth.get('总成交额(亿元)', 'N/A')} 亿元{_fmt_pct(breadth.get('总成交额环比(%)'))}")
         lines.append(
             f"  涨跌家数   : {breadth.get('上涨家数', 'N/A')} 涨 / "
             f"{breadth.get('下跌家数', 'N/A')} 跌 / {breadth.get('平盘家数', 'N/A')} 平"
@@ -60,8 +73,8 @@ def _format_a_stock_section(a_stock: dict) -> str:
         lines.append(f"  两融余额: [失败] {margin['error']}")
     elif isinstance(margin, dict) and margin:
         lines.append(
-            f"  两融余额   : {margin.get('两融总余额(亿元)', 'N/A')} 亿元"
-            f"  沪({margin.get('沪市日期', 'N/A')}): {margin.get('沪市两融余额(亿元)', 'N/A')}"
+            f"  两融余额   : {margin.get('两融总余额(亿元)', 'N/A')} 亿元{_fmt_pct(margin.get('两融总余额环比(%)'))} "
+            f" 沪({margin.get('沪市日期', 'N/A')}): {margin.get('沪市两融余额(亿元)', 'N/A')}"
             f"  深({margin.get('深市日期', 'N/A')}): {margin.get('深市两融余额(亿元)', 'N/A')}"
         )
 
@@ -96,10 +109,10 @@ def _format_a_stock_section(a_stock: dict) -> str:
         south = hsgt.get("南向资金合计(亿元)", "N/A")
         mood  = hsgt.get("北向情绪", "")
         lines.append(
-            f"  北向资金   : {north} 亿元 ({mood})"
+            f"  北向资金   : {north} 亿元{_fmt_delta(hsgt.get('北向资金环比变化(亿元)'))} ({mood})"
             f"  沪股通: {hsgt.get('沪股通(亿元)', 'N/A')}  深股通: {hsgt.get('深股通(亿元)', 'N/A')}"
         )
-        lines.append(f"  南向资金   : {south} 亿元")
+        lines.append(f"  南向资金   : {south} 亿元{_fmt_delta(hsgt.get('南向资金环比变化(亿元)'))}")
 
     return "\n".join(lines)
 

@@ -19,7 +19,14 @@ class DailyMarketCollector:
     def __init__(self):
         self.pro = get_pro()
         self.trade_date = _latest_trade_date()
+        self.prev_trade_date = self._fetch_prev_trade_date()
         self.report_date = datetime.now().strftime("%Y-%m-%d")
+
+    def _fetch_prev_trade_date(self) -> str:
+        today = datetime.now().strftime("%Y%m%d")
+        df = self.pro.trade_cal(exchange="SSE", end_date=today, is_open="1", limit=2)
+        df = df.sort_values("cal_date", ascending=False)
+        return str(df.iloc[1]["cal_date"]) if len(df) >= 2 else None
 
     def get_market_breadth(self) -> dict:
         """全市场涨跌分布与流动性（daily 接口）"""
@@ -48,9 +55,18 @@ class DailyMarketCollector:
         top10_amt = df.nlargest(int(len(df) * 0.1), "amount")["amount"].sum()
         concentration = top10_amt / total_amt * 100
 
+        turnover_chg = None
+        if self.prev_trade_date:
+            df_prev = self.pro.daily(trade_date=self.prev_trade_date)
+            if df_prev is not None and not df_prev.empty:
+                prev_turnover = df_prev["amount"].sum() / 10_000
+                if prev_turnover > 0:
+                    turnover_chg = round((total_turnover - prev_turnover) / prev_turnover * 100, 2)
+
         return {
             "交易日期": self.trade_date,
             "总成交额(亿元)": round(total_turnover, 2),
+            "总成交额环比(%)": turnover_chg,
             "上涨家数": advance,
             "下跌家数": decline,
             "平盘家数": flat,
@@ -90,15 +106,17 @@ class DailyMarketCollector:
         }
 
     def get_margin_balance(self) -> dict:
-        """沪深两融余额汇总（margin 接口，各交易所取各自最新一条）"""
-        def _latest_for(exchange: str) -> dict:
-            df = self.pro.margin(exchange_id=exchange, limit=1)
+        """沪深两融余额汇总（margin 接口，各交易所取各自最新两条）"""
+        def _latest_two_for(exchange: str) -> tuple:
+            df = self.pro.margin(exchange_id=exchange, limit=2)
             if df is None or df.empty:
-                return {}
-            return df.iloc[0].to_dict()
+                return {}, {}
+            curr = df.iloc[0].to_dict()
+            prev = df.iloc[1].to_dict() if len(df) >= 2 else {}
+            return curr, prev
 
-        sh = _latest_for("SSE")
-        sz = _latest_for("SZSE")
+        sh, sh_prev = _latest_two_for("SSE")
+        sz, sz_prev = _latest_two_for("SZSE")
         if not sh and not sz:
             return {"error": "margin 数据为空"}
 
@@ -108,12 +126,20 @@ class DailyMarketCollector:
 
         sh_bal = _yi(sh, "rzrqye") or 0
         sz_bal = _yi(sz, "rzrqye") or 0
+        total = round(sh_bal + sz_bal, 2)
+
+        sh_prev_bal = _yi(sh_prev, "rzrqye") or 0
+        sz_prev_bal = _yi(sz_prev, "rzrqye") or 0
+        prev_total = sh_prev_bal + sz_prev_bal
+        margin_chg = round((total - prev_total) / prev_total * 100, 2) if prev_total > 0 else None
+
         return {
             "沪市日期": sh.get("trade_date"),
             "深市日期": sz.get("trade_date"),
             "沪市两融余额(亿元)": sh_bal,
             "深市两融余额(亿元)": sz_bal,
-            "两融总余额(亿元)": round(sh_bal + sz_bal, 2),
+            "两融总余额(亿元)": total,
+            "两融总余额环比(%)": margin_chg,
             "沪市融资余额(亿元)": _yi(sh, "rzye"),
             "深市融资余额(亿元)": _yi(sz, "rzye"),
         }
@@ -131,12 +157,24 @@ class DailyMarketCollector:
 
         north = _yi(r["north_money"])
         south = _yi(r["south_money"])
+
+        north_delta = None
+        south_delta = None
+        if self.prev_trade_date:
+            df_prev = self.pro.moneyflow_hsgt(trade_date=self.prev_trade_date)
+            if df_prev is not None and not df_prev.empty:
+                rp = df_prev.iloc[0]
+                north_delta = round(north - _yi(rp["north_money"]), 2)
+                south_delta = round(south - _yi(rp["south_money"]), 2)
+
         return {
             "交易日期": self.trade_date,
             "北向资金合计(亿元)": north,
+            "北向资金环比变化(亿元)": north_delta,
             "沪股通(亿元)": _yi(r["hgt"]),
             "深股通(亿元)": _yi(r["sgt"]),
             "南向资金合计(亿元)": south,
+            "南向资金环比变化(亿元)": south_delta,
             "港股通(沪)(亿元)": _yi(r["ggt_ss"]),
             "港股通(深)(亿元)": _yi(r["ggt_sz"]),
             "北向情绪": "净流入" if north > 0 else "净流出",
