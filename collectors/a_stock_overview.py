@@ -6,6 +6,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tushare_client import get_pro
 
+A_SHARE_INDICES: list[tuple[str, str]] = [
+    ("上证指数", "000001.SH"),
+    ("深证成指", "399001.SZ"),
+    ("沪深300",  "000300.SH"),
+    ("创业板指", "399006.SZ"),
+    ("中证500",  "000905.SH"),
+    ("科创50",   "000688.SH"),
+]
+
 
 def _latest_trade_date() -> str:
     """通过 trade_cal 获取最近一个交易日（YYYYMMDD）"""
@@ -27,6 +36,29 @@ class DailyMarketCollector:
         df = self.pro.trade_cal(exchange="SSE", end_date=today, is_open="1", limit=2)
         df = df.sort_values("cal_date", ascending=False)
         return str(df.iloc[1]["cal_date"]) if len(df) >= 2 else None
+
+    def get_index_quotes(self) -> list[dict]:
+        """主要A股指数行情（index_daily 接口）"""
+        rows = []
+        for name, ts_code in A_SHARE_INDICES:
+            try:
+                df = self.pro.index_daily(ts_code=ts_code, trade_date=self.trade_date)
+                if df is None or df.empty:
+                    df = self.pro.index_daily(ts_code=ts_code, limit=1)
+                if df is None or df.empty:
+                    rows.append({"名称": name, "error": "无数据"})
+                    continue
+                r = df.iloc[0]
+                rows.append({
+                    "名称":      name,
+                    "最新价":    round(float(r["close"]), 2),
+                    "涨跌幅(%)": round(float(r["pct_chg"]), 2) if r["pct_chg"] is not None else None,
+                    "涨跌点":    round(float(r["change"]), 2)  if r.get("change") is not None else None,
+                    "交易日期":  str(r["trade_date"]),
+                })
+            except Exception as e:
+                rows.append({"名称": name, "error": str(e)})
+        return rows
 
     def get_market_breadth(self) -> dict:
         """全市场涨跌分布与流动性（daily 接口）"""
@@ -183,6 +215,7 @@ class DailyMarketCollector:
     def collect_all(self) -> dict:
         result = {}
         tasks = [
+            ("index_quotes", self.get_index_quotes),
             ("market_breadth", self.get_market_breadth),
             ("sector_fund_flow", self.get_sector_fund_flow),
             ("margin_balance", self.get_margin_balance),
@@ -197,33 +230,13 @@ class DailyMarketCollector:
 
 
 if __name__ == "__main__":
+    import json
+
     collector = DailyMarketCollector()
     print(f"\n{'='*40}")
     print(f" A股核心指标日报 | {collector.report_date}  交易日: {collector.trade_date}")
-    print(f"{'='*40}")
+    print(f"{'='*40}\n")
 
-    breadth = collector.get_market_breadth()
-    print("\n[1. 市场全局情绪]")
-    print(f"  ▸ 两市总成交额 : {breadth['总成交额(亿元)']} 亿元")
-    print(f"  ▸ 涨跌家数比   : {breadth['上涨家数']} 涨 / {breadth['下跌家数']} 跌 / {breadth['平盘家数']} 平")
-    print(f"  ▸ 涨跌停家数   : {breadth['涨停家数']} 涨停 / {breadth['跌停家数']} 跌停")
-    print(f"  ▸ 平均涨幅     : {breadth['市场平均涨幅']}  中位数: {breadth['涨幅中位数']}")
-
-    margin = collector.get_margin_balance()
-    print("\n[2. 杠杆情绪 (两融余额)]")
-    print(f"  ▸ 两融总余额   : {margin['两融总余额(亿元)']} 亿元")
-    print(f"  ▸ 沪({margin['沪市日期']}): {margin['沪市两融余额(亿元)']}  深({margin['深市日期']}): {margin['深市两融余额(亿元)']}")
-
-    sector = collector.get_sector_fund_flow(top_n=5)
-    print("\n[3. 行业板块涨幅 Top5 / 跌幅 Top5]")
-    for item in sector.get("涨幅前5", []):
-        print(f"  ▸ {item['板块']:<10} {item['涨跌幅(%)']:>6}%  净流入: {item['净流入(百万元)']}百万  领涨: {item['领涨股']} {item['领涨股涨幅(%)']}%")
-    print("  ---")
-    for item in sector.get("跌幅前5", []):
-        print(f"  ▸ {item['板块']:<10} {item['涨跌幅(%)']:>6}%  净流入: {item['净流入(百万元)']}百万  领涨: {item['领涨股']} {item['领涨股涨幅(%)']}%")
-
-    hsgt = collector.get_hsgt_flow()
-    print("\n[4. 沪深港通资金流向]")
-    print(f"  ▸ 北向资金     : {hsgt['北向资金合计(亿元)']} 亿元 ({hsgt['北向情绪']})  沪股通: {hsgt['沪股通(亿元)']}  深股通: {hsgt['深股通(亿元)']}")
-    print(f"  ▸ 南向资金     : {hsgt['南向资金合计(亿元)']} 亿元")
+    data = collector.collect_all()
+    print(json.dumps(data, ensure_ascii=False, indent=2))
     print()

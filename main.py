@@ -10,8 +10,9 @@
 import argparse
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import settings
 from senders.telegram_sender import send_report
@@ -32,6 +33,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 REPORTS_DIR = Path(__file__).parent / "reports"
+
+_SH = ZoneInfo("Asia/Shanghai")
+
+
+def is_a_stock_open_today() -> bool:
+    """今日（上海时区）A股是否开盘，查询失败时默认 True。"""
+    from tushare_client import get_pro
+    try:
+        today = datetime.now(_SH).strftime("%Y%m%d")
+        df = get_pro().trade_cal(exchange="SSE", start_date=today, end_date=today)
+        if df is None or df.empty:
+            return True
+        return str(df.iloc[0]["is_open"]) == "1"
+    except Exception as e:
+        logger.warning("A股交易日历查询失败，默认视为开盘: %s", e)
+        return True
+
+
+def is_us_market_open_yesterday() -> bool:
+    """昨日（上海时区的昨天）美股是否开盘。
+    Tushare trade_cal 不支持美股，改用 index_global 接口：
+    若昨日有 SPX 数据则视为开盘，无数据则视为休市，查询失败时默认 True。"""
+    from tushare_client import get_pro
+    try:
+        yesterday = (datetime.now(_SH) - timedelta(days=1)).strftime("%Y%m%d")
+        df = get_pro().query("index_global", trade_date=yesterday)
+        if df is None or df.empty:
+            return False
+        return "SPX" in df["ts_code"].values
+    except Exception as e:
+        logger.warning("美股开盘状态查询失败，默认视为开盘: %s", e)
+        return True
 
 
 def save_report(report: str, label: str, date_str: str) -> None:
@@ -78,11 +111,11 @@ def collect_morning() -> dict:
 
 
 def collect_evening() -> dict:
-    """晚报（18:00）：A股行情 + 中国宏观 + 财经资讯"""
+    """晚报（19:00）：A股行情 + 港股行情 + 中国宏观 + 财经资讯"""
     logger.info("=== 开始采集晚报数据 ===")
     data = {"report_date": datetime.now().strftime("%Y-%m-%d")}
 
-    logger.info("[1/3] 采集 A 股行情...")
+    logger.info("[1/4] 采集 A 股行情...")
     try:
         data["a_stock"] = DailyMarketCollector().collect_all()
         logger.info("  A 股采集完成")
@@ -90,7 +123,16 @@ def collect_evening() -> dict:
         logger.error("  A 股采集失败: %s", e)
         data["a_stock"] = {"error": str(e)}
 
-    logger.info("[2/3] 采集中国宏观数据...")
+    logger.info("[2/4] 采集港股行情...")
+    try:
+        from collectors.hk_stock_overview import HKStockCollector
+        data["hk_stock"] = HKStockCollector().collect_all()
+        logger.info("  港股采集完成")
+    except Exception as e:
+        logger.error("  港股采集失败: %s", e)
+        data["hk_stock"] = {"error": str(e)}
+
+    logger.info("[3/4] 采集中国宏观数据...")
     try:
         data["china_macro"] = ChinaMacroCollector().collect_all()
         logger.info("  中国宏观采集完成")
@@ -98,7 +140,7 @@ def collect_evening() -> dict:
         logger.error("  中国宏观采集失败: %s", e)
         data["china_macro"] = {"error": str(e)}
 
-    logger.info("[3/3] 采集财经资讯（RSS）...")
+    logger.info("[4/4] 采集财经资讯（RSS）...")
     try:
         data["news"] = MarketNewsCollector().collect_all(top_n=5)
         logger.info("  财经资讯采集完成")
@@ -113,7 +155,7 @@ def collect_evening() -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="金融日报生成器")
     parser.add_argument("--morning", action="store_true", help="生成晨报（09:00）")
-    parser.add_argument("--evening", action="store_true", help="生成晚报（18:00）")
+    parser.add_argument("--evening", action="store_true", help="生成晚报（19:00）")
     parser.add_argument("--send", action="store_true", help="采集后发送到 Telegram")
     args = parser.parse_args()
 
@@ -124,44 +166,52 @@ def main() -> None:
     reports: list[tuple[str, str]] = []
 
     if args.morning:
-        data = collect_morning()
-        logger.info("正在生成晨报 AI 摘要...")
-        ai_summary = generate_morning_summary(
-            data.get("global_macro", {}),
-            data.get("global_economy", {}),
-            data.get("news", {}),
-        )
-        report = format_morning_report(
-            data.get("global_macro", {}),
-            data.get("global_economy", {}),
-            data.get("news", {}),
-            data.get("report_date"),
-            ai_summary=ai_summary,
-        )
-        save_report(report, "晨报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
-        reports.append(("晨报", report))
-        if not args.send:
-            print(report)
+        if not is_us_market_open_yesterday():
+            logger.info("昨日美股未开盘，跳过今日晨报")
+        else:
+            data = collect_morning()
+            logger.info("正在生成晨报 AI 摘要...")
+            ai_summary = generate_morning_summary(
+                data.get("global_macro", {}),
+                data.get("global_economy", {}),
+                data.get("news", {}),
+            )
+            report = format_morning_report(
+                data.get("global_macro", {}),
+                data.get("global_economy", {}),
+                data.get("news", {}),
+                data.get("report_date"),
+                ai_summary=ai_summary,
+            )
+            save_report(report, "晨报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
+            reports.append(("晨报", report))
+            if not args.send:
+                print(report)
 
     if args.evening:
-        data = collect_evening()
-        logger.info("正在生成晚报 AI 摘要...")
-        ai_summary = generate_evening_summary(
-            data.get("a_stock", {}),
-            data.get("china_macro", {}),
-            data.get("news", {}),
-        )
-        report = format_evening_report(
-            data.get("a_stock", {}),
-            data.get("china_macro", {}),
-            data.get("news", {}),
-            data.get("report_date"),
-            ai_summary=ai_summary,
-        )
-        save_report(report, "晚报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
-        reports.append(("晚报", report))
-        if not args.send:
-            print(report)
+        if not is_a_stock_open_today():
+            logger.info("今日A股未开盘，跳过晚报")
+        else:
+            data = collect_evening()
+            logger.info("正在生成晚报 AI 摘要...")
+            ai_summary = generate_evening_summary(
+                data.get("a_stock", {}),
+                data.get("china_macro", {}),
+                data.get("news", {}),
+                hk_stock=data.get("hk_stock", {}),
+            )
+            report = format_evening_report(
+                data.get("a_stock", {}),
+                data.get("china_macro", {}),
+                data.get("news", {}),
+                data.get("report_date"),
+                ai_summary=ai_summary,
+                hk_stock=data.get("hk_stock", {}),
+            )
+            save_report(report, "晚报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
+            reports.append(("晚报", report))
+            if not args.send:
+                print(report)
 
     if args.send:
         bot_token = settings.TELEGRAM_BOT_TOKEN

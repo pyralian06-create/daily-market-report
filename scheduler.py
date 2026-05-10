@@ -1,7 +1,7 @@
 """定时调度守护进程
 
 09:00 Asia/Shanghai → 晨报（全球宏观 + 利率 + 资讯）
-18:00 Asia/Shanghai → 晚报（A 股行情 + 中国宏观 + 资讯）
+19:00 Asia/Shanghai → 晚报（A 股行情 + 港股行情 + 中国宏观 + 资讯）
 
 启动方式：
   python scheduler.py
@@ -20,7 +20,7 @@ import schedule
 sys.path.insert(0, str(Path(__file__).parent))
 
 import settings
-from main import collect_morning, collect_evening, save_report
+from main import collect_morning, collect_evening, save_report, is_a_stock_open_today, is_us_market_open_yesterday
 from reporters.morning_formatter import format_morning_report
 from reporters.evening_formatter import format_evening_report
 from reporters.ai_summarizer import generate_morning_summary, generate_evening_summary
@@ -52,6 +52,9 @@ def shanghai_to_local(hour: int, minute: int) -> str:
 
 def run_morning() -> None:
     logger.info("触发晨报任务...")
+    if not is_us_market_open_yesterday():
+        logger.info("昨日美股未开盘，跳过今日晨报")
+        return
     try:
         data = collect_morning()
         logger.info("正在生成晨报 AI 摘要...")
@@ -82,6 +85,9 @@ def run_morning() -> None:
 
 def run_evening() -> None:
     logger.info("触发晚报任务...")
+    if not is_a_stock_open_today():
+        logger.info("今日A股未开盘，跳过晚报")
+        return
     try:
         data = collect_evening()
         logger.info("正在生成晚报 AI 摘要...")
@@ -89,6 +95,7 @@ def run_evening() -> None:
             data.get("a_stock", {}),
             data.get("china_macro", {}),
             data.get("news", {}),
+            hk_stock=data.get("hk_stock", {}),
         )
         report = format_evening_report(
             data.get("a_stock", {}),
@@ -96,6 +103,7 @@ def run_evening() -> None:
             data.get("news", {}),
             data.get("report_date"),
             ai_summary=ai_summary,
+            hk_stock=data.get("hk_stock", {}),
         )
         save_report(report, "晚报", data.get("report_date", ""))
         bot_token = settings.TELEGRAM_BOT_TOKEN
@@ -113,7 +121,7 @@ def run_evening() -> None:
 def reschedule_daily() -> None:
     schedule.clear()
     morning_local = shanghai_to_local(9, 0)
-    evening_local = shanghai_to_local(18, 0)
+    evening_local = shanghai_to_local(19, 0)
     schedule.every().day.at(morning_local).do(run_morning)
     schedule.every().day.at(evening_local).do(run_evening)
     # 每天 00:01 重新计算，应对夏令时或时区变更
