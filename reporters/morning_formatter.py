@@ -193,13 +193,6 @@ def _format_news_section(news: dict) -> str:
         for i, item in enumerate(entries, 1):
             title = item.get("title", "")
             link = item.get("link", "")
-            date_str = item.get("date", "")
-            desc = item.get("desc", "")
-            title_line = f"**{i}. [{title}]({link})**" if link else f"**{i}. {title}**"
-            lines.append(title_line)
-            lines.append(f"* {date_str}")
-            if desc and desc not in title:
-                lines.append(f"> {desc}")
-            lines.append("")
-        lines.append("---")
+            lines.append(f"{i}. [{title}]({link})" if link else f"{i}. {title}")
+        lines.append("")
     return "\n".join(lines)

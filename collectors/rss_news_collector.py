@@ -1,11 +1,17 @@
 import feedparser
-import json
 import re
-from pathlib import Path
 from bs4 import BeautifulSoup
 from datetime import datetime
+from pathlib import Path
 
 TESTS_DIR = Path(__file__).parent.parent / "tests"
+
+# 标题含以下关键词视为总结性新闻，向 LLM 提供完整正文
+_SUMMARY_KEYWORDS = ["早报", "晚报", "日报", "周报", "月报", "策略", "展望", "研报", "简报", "快报"]
+
+
+def _is_summary_type(title: str) -> bool:
+    return any(kw in title for kw in _SUMMARY_KEYWORDS)
 
 
 class MarketNewsCollector:
@@ -17,8 +23,7 @@ class MarketNewsCollector:
         # 定义需要采集的 RSS 路由映射
         self.feeds = {
             "【财联社电报】(突发事件/实时情绪)": f"{self.base_url}/cls/depth/1000",
-            "【东方财富研报】(机构策略与宏观视点)": f"{self.base_url}/eastmoney/report/strategyreport",
-            "【华尔街见闻】 - 最热文章":f"{self.base_url}/wallstreetcn/hot"
+            "【华尔街见闻】 - 最热文章": f"{self.base_url}/wallstreetcn/hot",
         }
 
     def _clean_html(self, html_content):
@@ -48,19 +53,21 @@ class MarketNewsCollector:
             title = entry.get("title", "无标题")
             link = entry.get("link", "")
             
-            # 提取正文并清洗标签 (财联社的电报内容通常全在 description 里)
+            # 提取正文并清洗标签
             desc_html = entry.get("description", "")
             clean_desc = self._clean_html(desc_html)
-            
-            # 如果摘要太长，截断它
-            if len(clean_desc) > 150:
-                clean_desc = clean_desc[:147] + "..."
+
+            is_summary = _is_summary_type(title)
+            # 总结性新闻保留完整正文（上限 10000 字符）供 LLM 使用；普通新闻截断为短摘要
+            short_desc = clean_desc[:147] + "..." if len(clean_desc) > 150 else clean_desc
+            full_content = clean_desc[:10000] if is_summary else ""
 
             entries_data.append({
                 "title": title,
                 "date": pub_date,
-                "desc": clean_desc,
-                "link": link
+                "desc": short_desc,
+                "link": link,
+                "full_content": full_content,
             })
             
         return entries_data
@@ -109,7 +116,7 @@ class MarketNewsCollector:
 # ==========================================
 if __name__ == "__main__":
     collector = MarketNewsCollector()
-    markdown_report = collector.generate_report(top_n=5)
+    markdown_report = collector.generate_report(top_n=10)
     
     # 打印到控制台
     print("\n" + "="*50 + "\n")

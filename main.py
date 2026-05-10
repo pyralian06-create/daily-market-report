@@ -109,7 +109,7 @@ def collect_morning() -> dict:
 
     logger.info("[4/4] 采集财经资讯（RSS）...")
     try:
-        data["news"] = MarketNewsCollector().collect_all(top_n=5)
+        data["news"] = MarketNewsCollector().collect_all(top_n=10)
         logger.info("  财经资讯采集完成")
     except Exception as e:
         logger.error("  财经资讯采集失败: %s", e)
@@ -160,7 +160,7 @@ def collect_evening() -> dict:
 
     logger.info("[5/5] 采集财经资讯（RSS）...")
     try:
-        data["news"] = MarketNewsCollector().collect_all(top_n=5)
+        data["news"] = MarketNewsCollector().collect_all(top_n=10)
         logger.info("  财经资讯采集完成")
     except Exception as e:
         logger.error("  财经资讯采集失败: %s", e)
