@@ -76,11 +76,11 @@ def save_report(report: str, label: str, date_str: str) -> None:
 
 
 def collect_morning() -> dict:
-    """晨报（9:00）：全球经济指标 + 全球指数行情 + 财经资讯"""
+    """晨报（9:00）：全球经济指标 + 全球指数行情 + 美股广度 + 财经资讯"""
     logger.info("=== 开始采集晨报数据 ===")
     data = {"report_date": datetime.now().strftime("%Y-%m-%d")}
 
-    logger.info("[1/3] 采集全球经济指标（国债/利率）...")
+    logger.info("[1/4] 采集全球经济指标（国债/利率）...")
     try:
         eco = GlobalEconomyCollector().collect_all()
         intl = IntlMacroCollector().collect_all()
@@ -90,7 +90,7 @@ def collect_morning() -> dict:
         logger.error("  全球经济指标采集失败: %s", e)
         data["global_economy"] = {"error": str(e)}
 
-    logger.info("[2/3] 采集全球指数行情（A股/美股/港股/大宗商品）...")
+    logger.info("[2/4] 采集全球指数行情（A股/美股/港股/大宗商品）...")
     try:
         data["global_macro"] = GlobalMacroCollector().collect_all()
         logger.info("  全球指数采集完成")
@@ -98,7 +98,16 @@ def collect_morning() -> dict:
         logger.error("  全球指数采集失败: %s", e)
         data["global_macro"] = {"error": str(e)}
 
-    logger.info("[3/3] 采集财经资讯（RSS）...")
+    logger.info("[3/4] 采集美股行情（昨日收盘广度）...")
+    try:
+        from collectors.us_stock_overview import USStockCollector
+        data["us_stock"] = USStockCollector().collect_all()
+        logger.info("  美股采集完成")
+    except Exception as e:
+        logger.error("  美股采集失败: %s", e)
+        data["us_stock"] = {"error": str(e)}
+
+    logger.info("[4/4] 采集财经资讯（RSS）...")
     try:
         data["news"] = MarketNewsCollector().collect_all(top_n=5)
         logger.info("  财经资讯采集完成")
@@ -184,6 +193,7 @@ def main() -> None:
                 data.get("global_macro", {}),
                 data.get("global_economy", {}),
                 data.get("news", {}),
+                us_stock=data.get("us_stock", {}),
             )
             report = format_morning_report(
                 data.get("global_macro", {}),
@@ -191,6 +201,7 @@ def main() -> None:
                 data.get("news", {}),
                 data.get("report_date"),
                 ai_summary=ai_summary,
+                us_stock=data.get("us_stock", {}),
             )
             save_report(report, "晨报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
             reports.append(("晨报", report))

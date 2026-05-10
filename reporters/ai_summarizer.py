@@ -77,7 +77,11 @@ def _pct_str(item: Optional[dict]) -> str:
     return f"{price} ({sign}{pct}%)"
 
 
-def _extract_morning_signals(global_macro: dict, global_economy: dict) -> str:
+def _extract_morning_signals(
+    global_macro: dict,
+    global_economy: dict,
+    us_stock: Optional[dict] = None,
+) -> str:
     lines = []
 
     rates = global_macro.get("宏观利率", [])
@@ -93,6 +97,20 @@ def _extract_morning_signals(global_macro: dict, global_economy: dict) -> str:
             item = _find(us, substr)
             if item:
                 lines.append(f"{name}: {_pct_str(item)}")
+
+    # 美股昨日广度（来自 us_daily）
+    if us_stock and isinstance(us_stock, dict) and "error" not in us_stock:
+        us_idx = us_stock.get("index_quotes", [])
+        if isinstance(us_idx, list):
+            for item in us_idx:
+                if "error" not in item:
+                    lines.append(f"美股{item.get('名称', '')}: {_pct_str(item)}")
+        us_breadth = us_stock.get("market_breadth", {})
+        if isinstance(us_breadth, dict) and "error" not in us_breadth:
+            adv = us_breadth.get("上涨家数", "N/A")
+            dec = us_breadth.get("下跌家数", "N/A")
+            avg = us_breadth.get("市场平均涨幅", "N/A")
+            lines.append(f"美股涨跌家数: {adv} 涨 / {dec} 跌  均涨幅: {avg}")
 
     hk = global_macro.get("港股&欧亚", [])
     if isinstance(hk, list):
@@ -249,12 +267,13 @@ def generate_morning_summary(
     global_economy: dict,
     news: dict,
     timeout: int = 120,
+    us_stock: Optional[dict] = None,
 ) -> Optional[str]:
     if not settings.GOOGLE_API_KEY:
         logger.warning("GOOGLE_API_KEY 未配置，跳过 AI 摘要")
         return None
     try:
-        signals = _extract_morning_signals(global_macro, global_economy)
+        signals = _extract_morning_signals(global_macro, global_economy, us_stock=us_stock)
         headlines = _extract_news_headlines(news)
         prompt = _MORNING_PROMPT.format(signals_block=signals, headlines_block=headlines)
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:

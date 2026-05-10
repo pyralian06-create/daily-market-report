@@ -62,6 +62,7 @@ def run_morning() -> None:
             data.get("global_macro", {}),
             data.get("global_economy", {}),
             data.get("news", {}),
+            us_stock=data.get("us_stock", {}),
         )
         report = format_morning_report(
             data.get("global_macro", {}),
@@ -69,6 +70,7 @@ def run_morning() -> None:
             data.get("news", {}),
             data.get("report_date"),
             ai_summary=ai_summary,
+            us_stock=data.get("us_stock", {}),
         )
         save_report(report, "晨报", data.get("report_date", ""))
         bot_token = settings.TELEGRAM_BOT_TOKEN
