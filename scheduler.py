@@ -96,6 +96,7 @@ def run_evening() -> None:
             data.get("china_macro", {}),
             data.get("news", {}),
             hk_stock=data.get("hk_stock", {}),
+            us_stock=data.get("us_stock", {}),
         )
         report = format_evening_report(
             data.get("a_stock", {}),
@@ -104,6 +105,7 @@ def run_evening() -> None:
             data.get("report_date"),
             ai_summary=ai_summary,
             hk_stock=data.get("hk_stock", {}),
+            us_stock=data.get("us_stock", {}),
         )
         save_report(report, "晚报", data.get("report_date", ""))
         bot_token = settings.TELEGRAM_BOT_TOKEN

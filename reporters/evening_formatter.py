@@ -24,12 +24,14 @@ def format_evening_report(
     report_date: Optional[str] = None,
     ai_summary: Optional[str] = None,
     hk_stock: Optional[dict] = None,
+    us_stock: Optional[dict] = None,
 ) -> str:
     date = report_date or datetime.now().strftime("%Y-%m-%d")
     sections = [
         f"=== 晚报 {date} ===\n",
         _format_a_stock_section(a_stock),
         _format_hk_stock_section(hk_stock or {}),
+        _format_us_stock_section(us_stock or {}),
         _format_china_macro_section(china_macro),
         _format_news_section(news),
     ]
@@ -187,6 +189,60 @@ def _format_hk_stock_section(hk_stock: dict) -> str:
         )
         lines.append(
             f"  总成交额   : {breadth.get('总成交额(亿港元)', 'N/A')} 亿港元"
+            f"{_fmt_pct(breadth.get('成交额环比(%)'))}"
+            f"  均涨幅: {breadth.get('市场平均涨幅', 'N/A')}"
+        )
+        lines.append(
+            f"  强势/弱势  : 涨>3% {breadth.get('强势股占比(>3%)', 'N/A')}"
+            f"  跌>3% {breadth.get('弱势股占比(<-3%)', 'N/A')}"
+        )
+
+    return "\n".join(lines)
+
+
+# ── 美股行情 ─────────────────────────────────────────────────────────────
+
+def _format_us_stock_section(us_stock: dict) -> str:
+    lines = ["【美 股 行 情】"]
+    if not us_stock:
+        lines.append("  暂无数据")
+        return "\n".join(lines)
+    if "error" in us_stock:
+        lines.append(f"  [失败] {us_stock['error']}")
+        return "\n".join(lines)
+
+    trade_date = us_stock.get("trade_date", "")
+    if trade_date:
+        lines.append(f"  交易日期   : {trade_date}")
+
+    # 主要指数
+    index_quotes = us_stock.get("index_quotes")
+    if isinstance(index_quotes, list) and index_quotes:
+        lines.append("  主要指数:")
+        for item in index_quotes:
+            if "error" in item:
+                lines.append(f"    {item.get('名称', '?'):<10} [失败] {item['error']}")
+                continue
+            pct = item.get("涨跌幅(%)")
+            chg = item.get("涨跌点")
+            sign = "+" if pct is not None and pct >= 0 else ""
+            pct_str = f"{sign}{pct:.2f}%" if pct is not None else "N/A"
+            chg_str = f"  {sign}{chg:.2f}pt" if chg is not None else ""
+            lines.append(f"    {item['名称']:<10}  {item['最新价']:>10.2f}  {pct_str:>9}{chg_str}")
+
+    # 市场广度
+    breadth = us_stock.get("market_breadth", {})
+    if isinstance(breadth, dict) and "error" in breadth:
+        lines.append(f"  市场广度: [失败] {breadth['error']}")
+    elif isinstance(breadth, dict) and breadth:
+        adv_delta = _fmt_count_delta(breadth.get("上涨家数环比"))
+        dec_delta = _fmt_count_delta(breadth.get("下跌家数环比"))
+        lines.append(
+            f"  涨跌家数   : {breadth.get('上涨家数', 'N/A')}{adv_delta} 涨 / "
+            f"{breadth.get('下跌家数', 'N/A')}{dec_delta} 跌 / {breadth.get('平盘家数', 'N/A')} 平"
+        )
+        lines.append(
+            f"  总成交额   : {breadth.get('总成交额(亿美元)', 'N/A')} 亿美元"
             f"{_fmt_pct(breadth.get('成交额环比(%)'))}"
             f"  均涨幅: {breadth.get('市场平均涨幅', 'N/A')}"
         )

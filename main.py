@@ -111,11 +111,11 @@ def collect_morning() -> dict:
 
 
 def collect_evening() -> dict:
-    """晚报（19:00）：A股行情 + 港股行情 + 中国宏观 + 财经资讯"""
+    """晚报（19:00）：A股行情 + 港股行情 + 美股行情 + 中国宏观 + 财经资讯"""
     logger.info("=== 开始采集晚报数据 ===")
     data = {"report_date": datetime.now().strftime("%Y-%m-%d")}
 
-    logger.info("[1/4] 采集 A 股行情...")
+    logger.info("[1/5] 采集 A 股行情...")
     try:
         data["a_stock"] = DailyMarketCollector().collect_all()
         logger.info("  A 股采集完成")
@@ -123,7 +123,7 @@ def collect_evening() -> dict:
         logger.error("  A 股采集失败: %s", e)
         data["a_stock"] = {"error": str(e)}
 
-    logger.info("[2/4] 采集港股行情...")
+    logger.info("[2/5] 采集港股行情...")
     try:
         from collectors.hk_stock_overview import HKStockCollector
         data["hk_stock"] = HKStockCollector().collect_all()
@@ -132,7 +132,16 @@ def collect_evening() -> dict:
         logger.error("  港股采集失败: %s", e)
         data["hk_stock"] = {"error": str(e)}
 
-    logger.info("[3/4] 采集中国宏观数据...")
+    logger.info("[3/5] 采集美股行情...")
+    try:
+        from collectors.us_stock_overview import USStockCollector
+        data["us_stock"] = USStockCollector().collect_all()
+        logger.info("  美股采集完成")
+    except Exception as e:
+        logger.error("  美股采集失败: %s", e)
+        data["us_stock"] = {"error": str(e)}
+
+    logger.info("[4/5] 采集中国宏观数据...")
     try:
         data["china_macro"] = ChinaMacroCollector().collect_all()
         logger.info("  中国宏观采集完成")
@@ -140,7 +149,7 @@ def collect_evening() -> dict:
         logger.error("  中国宏观采集失败: %s", e)
         data["china_macro"] = {"error": str(e)}
 
-    logger.info("[4/4] 采集财经资讯（RSS）...")
+    logger.info("[5/5] 采集财经资讯（RSS）...")
     try:
         data["news"] = MarketNewsCollector().collect_all(top_n=5)
         logger.info("  财经资讯采集完成")
@@ -199,6 +208,7 @@ def main() -> None:
                 data.get("china_macro", {}),
                 data.get("news", {}),
                 hk_stock=data.get("hk_stock", {}),
+                us_stock=data.get("us_stock", {}),
             )
             report = format_evening_report(
                 data.get("a_stock", {}),
@@ -207,6 +217,7 @@ def main() -> None:
                 data.get("report_date"),
                 ai_summary=ai_summary,
                 hk_stock=data.get("hk_stock", {}),
+                us_stock=data.get("us_stock", {}),
             )
             save_report(report, "晚报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
             reports.append(("晚报", report))
