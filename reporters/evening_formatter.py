@@ -24,14 +24,12 @@ def format_evening_report(
     report_date: Optional[str] = None,
     ai_summary: Optional[str] = None,
     hk_stock: Optional[dict] = None,
-    us_stock: Optional[dict] = None,
 ) -> str:
     date = report_date or datetime.now().strftime("%Y-%m-%d")
     sections = [
         f"=== 晚报 {date} ===\n",
         _format_a_stock_section(a_stock),
         _format_hk_stock_section(hk_stock or {}),
-        _format_us_stock_section(us_stock or {}),
         _format_china_macro_section(china_macro),
         _format_news_section(news),
     ]

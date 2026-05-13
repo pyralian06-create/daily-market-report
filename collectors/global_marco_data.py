@@ -35,9 +35,9 @@ A_SHARE_INDICES: list[tuple[str, str]] = [
 
 # ── 境外市场（yfinance ticker）─────────────────────────────────────────
 US_INDICES: list[tuple[str, str]] = [
-    ("标普500(期货)",  "ES=F"),    # ^GSPC 在当前Yahoo版本无数据，用期货代替
-    ("纳斯达克(期货)", "NQ=F"),    # ^IXIC 同上
-    ("道琼斯",        "^DJI"),
+    ("标普500",    "^GSPC"),
+    ("纳斯达克综合", "^IXIC"),
+    ("道琼斯",     "^DJI"),
 ]
 
 MACRO_RATES: list[tuple[str, str]] = [
@@ -48,8 +48,6 @@ MACRO_RATES: list[tuple[str, str]] = [
 ]
 
 HK_EU_INDICES: list[tuple[str, str]] = [
-    ("恒生指数",   "^HSI"),
-    ("恒生科技",   "3032.HK"),   # ^HSTECH Yahoo不支持，用ETF代替
     ("日经225",    "^N225"),
     ("德国DAX",    "^GDAXI"),
     ("英国富时100", "^FTSE"),

@@ -52,16 +52,14 @@ def is_a_stock_open_today() -> bool:
 
 
 def is_us_market_open_yesterday() -> bool:
-    """昨日（上海时区的昨天）美股是否开盘。
-    Tushare trade_cal 不支持美股，改用 index_global 接口：
-    若昨日有 SPX 数据则视为开盘，无数据则视为休市，查询失败时默认 True。"""
+    """昨日（上海时区的昨天）美股是否开盘，使用 us_tradecal 接口查询。"""
     from tushare_client import get_pro
     try:
         yesterday = (datetime.now(_SH) - timedelta(days=1)).strftime("%Y%m%d")
-        df = get_pro().query("index_global", trade_date=yesterday)
+        df = get_pro().us_tradecal(start_date=yesterday, end_date=yesterday)
         if df is None or df.empty:
-            return False
-        return "SPX" in df["ts_code"].values
+            return True
+        return str(df.iloc[0]["is_open"]) == "1"
     except Exception as e:
         logger.warning("美股开盘状态查询失败，默认视为开盘: %s", e)
         return True
@@ -120,7 +118,7 @@ def collect_morning() -> dict:
 
 
 def collect_evening() -> dict:
-    """晚报（19:00）：A股行情 + 港股行情 + 美股行情 + 中国宏观 + 财经资讯"""
+    """晚报（19:00）：A股行情 + 港股行情 + 中国宏观 + 财经资讯"""
     logger.info("=== 开始采集晚报数据 ===")
     data = {"report_date": datetime.now().strftime("%Y-%m-%d")}
 
@@ -141,16 +139,7 @@ def collect_evening() -> dict:
         logger.error("  港股采集失败: %s", e)
         data["hk_stock"] = {"error": str(e)}
 
-    logger.info("[3/5] 采集美股行情...")
-    try:
-        from collectors.us_stock_overview import USStockCollector
-        data["us_stock"] = USStockCollector().collect_all()
-        logger.info("  美股采集完成")
-    except Exception as e:
-        logger.error("  美股采集失败: %s", e)
-        data["us_stock"] = {"error": str(e)}
-
-    logger.info("[4/5] 采集中国宏观数据...")
+    logger.info("[3/4] 采集中国宏观数据...")
     try:
         data["china_macro"] = ChinaMacroCollector().collect_all()
         logger.info("  中国宏观采集完成")
@@ -158,7 +147,7 @@ def collect_evening() -> dict:
         logger.error("  中国宏观采集失败: %s", e)
         data["china_macro"] = {"error": str(e)}
 
-    logger.info("[5/5] 采集财经资讯（RSS）...")
+    logger.info("[4/4] 采集财经资讯（RSS）...")
     try:
         data["news"] = MarketNewsCollector().collect_all(top_n=10)
         logger.info("  财经资讯采集完成")
@@ -219,7 +208,6 @@ def main() -> None:
                 data.get("china_macro", {}),
                 data.get("news", {}),
                 hk_stock=data.get("hk_stock", {}),
-                us_stock=data.get("us_stock", {}),
             )
             report = format_evening_report(
                 data.get("a_stock", {}),
@@ -228,7 +216,6 @@ def main() -> None:
                 data.get("report_date"),
                 ai_summary=ai_summary,
                 hk_stock=data.get("hk_stock", {}),
-                us_stock=data.get("us_stock", {}),
             )
             save_report(report, "晚报", data.get("report_date", datetime.now().strftime("%Y-%m-%d")))
             reports.append(("晚报", report))

@@ -2,7 +2,7 @@
 
 数据源：Tushare Pro
   us_tradecal  — 美股交易日历
-  index_global — 全球指数行情（含 SPX / NDX / DJI）
+  index_global — 全球指数行情（含 SPX / DJI）
   us_daily     — 美股个股日行情（全市场快照，用于广度分析）
 
 us_daily.amount 单位待确认（可能为美元）。
@@ -34,22 +34,34 @@ from tushare_client import get_pro
 _AMOUNT_USD_TO_YI = 1e8
 
 US_INDEX_CODES: list[tuple[str, str]] = [
-    ("标普500",     "SPX"),
-    ("纳斯达克100", "NDX"),
-    ("道琼斯",      "DJI"),
+    ("标普500", "SPX"),
+    ("道琼斯",  "DJI"),
 ]
 
 
 def _get_us_trade_dates(pro) -> tuple[str, str | None]:
-    """获取最近两个美股交易日（当日、昨日），使用 us_tradecal 接口"""
+    """获取最近两个有 index_global 数据的美股交易日（处理未到开盘时间的情况）"""
     today = datetime.now().strftime("%Y%m%d")
-    df = pro.us_tradecal(end_date=today, is_open="1", limit=2)
+    df = pro.us_tradecal(end_date=today, is_open="1", limit=10)
     if df is None or df.empty:
         raise RuntimeError("us_tradecal 返回空数据，无法获取美股交易日历")
     df = df.sort_values("cal_date", ascending=False)
-    curr = str(df.iloc[0]["cal_date"])
-    prev = str(df.iloc[1]["cal_date"]) if len(df) >= 2 else None
-    return curr, prev
+    dates = [str(d) for d in df["cal_date"]]
+
+    # 找到最近两个有 SPX index_global 数据的交易日
+    found: list[str] = []
+    for d in dates:
+        chk = pro.query("index_global", trade_date=d)
+        if chk is not None and not chk.empty and "SPX" in chk["ts_code"].values:
+            found.append(d)
+            if len(found) == 2:
+                break
+
+    if len(found) >= 2:
+        return found[0], found[1]
+    if len(found) == 1:
+        return found[0], None
+    return dates[0], dates[1] if len(dates) >= 2 else (dates[0], None)
 
 
 class USStockCollector:
@@ -65,7 +77,7 @@ class USStockCollector:
             df = self.pro.us_daily(trade_date=self.trade_date)
             if df is not None and not df.empty:
                 df = df.copy()
-                df["pct_chg"] = pd.to_numeric(df["pct_chg"], errors="coerce")
+                df["pct_change"] = pd.to_numeric(df["pct_change"], errors="coerce")
                 df["amount"]  = pd.to_numeric(df["amount"],  errors="coerce")
                 self._full_df = df
 
@@ -73,7 +85,7 @@ class USStockCollector:
             df = self.pro.us_daily(trade_date=self.prev_trade_date)
             if df is not None and not df.empty:
                 df = df.copy()
-                df["pct_chg"] = pd.to_numeric(df["pct_chg"], errors="coerce")
+                df["pct_change"] = pd.to_numeric(df["pct_change"], errors="coerce")
                 df["amount"]  = pd.to_numeric(df["amount"],  errors="coerce")
                 self._prev_df = df
 
@@ -110,13 +122,13 @@ class USStockCollector:
             return {"error": "us_daily 数据为空"}
 
         df = self._full_df
-        advance = int((df["pct_chg"] > 0).sum())
-        decline = int((df["pct_chg"] < 0).sum())
-        flat    = int((df["pct_chg"] == 0).sum())
+        advance = int((df["pct_change"] > 0).sum())
+        decline = int((df["pct_change"] < 0).sum())
+        flat    = int((df["pct_change"] == 0).sum())
         total_turnover = df["amount"].sum() / _AMOUNT_USD_TO_YI
-        avg_pct   = round(float(df["pct_chg"].mean()), 2)
-        strong    = round((df["pct_chg"] > 3).sum() / len(df) * 100, 2)
-        weak      = round((df["pct_chg"] < -3).sum() / len(df) * 100, 2)
+        avg_pct   = round(float(df["pct_change"].mean()), 2)
+        strong    = round((df["pct_change"] > 3).sum() / len(df) * 100, 2)
+        weak      = round((df["pct_change"] < -3).sum() / len(df) * 100, 2)
 
         result: dict = {
             "交易日期":           self.trade_date,
@@ -134,8 +146,8 @@ class USStockCollector:
 
         if self._prev_df is not None:
             pv = self._prev_df
-            prev_advance  = int((pv["pct_chg"] > 0).sum())
-            prev_decline  = int((pv["pct_chg"] < 0).sum())
+            prev_advance  = int((pv["pct_change"] > 0).sum())
+            prev_decline  = int((pv["pct_change"] < 0).sum())
             prev_turnover = pv["amount"].sum() / _AMOUNT_USD_TO_YI
 
             result["上涨家数环比"] = advance - prev_advance

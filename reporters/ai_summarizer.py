@@ -184,7 +184,6 @@ def _extract_evening_signals(
     a_stock: dict,
     china_macro: dict,
     hk_stock: Optional[dict] = None,
-    us_stock: Optional[dict] = None,
 ) -> str:
     lines = []
 
@@ -258,26 +257,6 @@ def _extract_evening_signals(
                 if "error" not in item and item.get("名称") == "恒生指数":
                     lines.append(f"恒生指数: {_pct_str(item)}")
                     break
-        hk_breadth = hk_stock.get("market_breadth", {})
-        if isinstance(hk_breadth, dict) and "error" not in hk_breadth:
-            adv = hk_breadth.get("上涨家数", "N/A")
-            dec = hk_breadth.get("下跌家数", "N/A")
-            avg = hk_breadth.get("市场平均涨幅", "N/A")
-            lines.append(f"港股涨跌家数: {adv} 涨 / {dec} 跌  均涨幅: {avg}")
-
-    # 美股信号（昨日收盘，作为 A 股当日关联背景）
-    if us_stock and isinstance(us_stock, dict) and "error" not in us_stock:
-        us_idx = us_stock.get("index_quotes", [])
-        if isinstance(us_idx, list):
-            for item in us_idx:
-                if "error" not in item:
-                    lines.append(f"美股{item.get('名称', '')}: {_pct_str(item)}")
-        us_breadth = us_stock.get("market_breadth", {})
-        if isinstance(us_breadth, dict) and "error" not in us_breadth:
-            adv = us_breadth.get("上涨家数", "N/A")
-            dec = us_breadth.get("下跌家数", "N/A")
-            avg = us_breadth.get("市场平均涨幅", "N/A")
-            lines.append(f"美股涨跌家数: {adv} 涨 / {dec} 跌  均涨幅: {avg}")
 
     return "\n".join(lines) if lines else "暂无关键数据"
 
@@ -329,13 +308,12 @@ def generate_evening_summary(
     news: dict,
     timeout: int = 120,
     hk_stock: Optional[dict] = None,
-    us_stock: Optional[dict] = None,
 ) -> Optional[str]:
     if not settings.GOOGLE_API_KEY:
         logger.warning("GOOGLE_API_KEY 未配置，跳过 AI 摘要")
         return None
     try:
-        signals = _extract_evening_signals(a_stock, china_macro, hk_stock=hk_stock, us_stock=us_stock)
+        signals = _extract_evening_signals(a_stock, china_macro, hk_stock=hk_stock)
         headlines = _extract_news_headlines(news)
         morning_summary = _load_morning_ai_summary()
         if morning_summary:
